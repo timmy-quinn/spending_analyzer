@@ -6,7 +6,10 @@ import csv
 from tkinter import Tk     # from tkinter import Tk for Python 3.x
 from tkinter.filedialog import askopenfilename
 import shutil
+import xlsxwriter
 import os
+
+destPath = ''
 
 class purchase:
     def __str__(self):
@@ -74,15 +77,11 @@ def getStatement(pdf):
 
 def formatMonth(statementPeriod):
     global months
-    month = ''
-    for m in months: 
-        month = statementPeriod.find(m)
 
-    if(month != -1): 
-        statementPeriod[len(month)]= '_'
-        return statementPeriod
-    else: 
-        return None
+    for month in months: 
+        if(statementPeriod.find(month) != -1): 
+            return '_' + statementPeriod[0:len(month)] + '_' + statementPeriod[len(month)+1:]
+    return None
     
 
 def dateToString(date):
@@ -90,7 +89,7 @@ def dateToString(date):
     global months
     for c in date: 
         if(c == '/'): 
-            return months[int(monthNumber) - 1]
+            return months[int(monthNumber) - 1] + date[-2:]
         else: 
             monthNumber += c
     return 'Unknown'
@@ -98,12 +97,15 @@ def dateToString(date):
 
 def getMonth(statement, purchases):
     for i in range(len(statement)): 
-        if(statement[i] == 'Statement period' and i < len(statement)): 
+        print(statement[i])
+        if(statement[i] == 'Statement period' and i < len(statement)):
+            print(f'Month: {statement[i+1]}')
             return formatMonth(statement[i+1])
     purchaseDates = {}
     for purchase in purchases: # This is a just in case, if the chime format changes 
         purchaseDates[dateToString(purchase.date)]
-    return None
+    
+    return max(purchaseDates, key = purchaseDates.get())
 
 def requestCategory(purchase):
     while True:
@@ -157,17 +159,49 @@ def getSpending(purchases):
     totals.update({'Total': allSpending})
     return totals
 
-def printPercentages(totals):
-    percentages = []
-    categories = []
+def generateXLSXFiles(percentages, totals, date): 
+    global destPath
+    workbook = xlsxwriter.Workbook(destPath + date + '.xlsx')
+    worksheet = workbook.add_worksheet()
+
+    # Start from the first cell. Rows and columns are zero indexed.
+    textCol = 0
+    percentCol = 1
+    totalCol = 2
+
+    worksheet.write(0, 0, f'Spending for {date}')
+    row = 1
+    # Iterate over the data and write it out row by row.
+    for key, value in list(percentages.items())[:-1]:
+        worksheet.write(row, textCol,     key)
+        worksheet.write(row, percentCol, value)
+        worksheet.write(row, totalCol, f'${totals[key]}')
+        row += 1
+    
+    # Write a total using a formula.
+    worksheet.write(row, textCol, 'Total')
+    worksheet.write(row, totalCol, f"${totals}['Total']")
+
+    workbook.close()
+
+
+def generateOutputs(totals, date):
+    percentages = {}
     for key, value in list(totals.items())[:-1]: 
         percent = round((value/(totals['Total']) *100), 2)
-        print(f"{key} : {percent}%")
-        categories.append(key)
-        percentages.append(int(percent*100))
+        percentages[key] = int(percent * 100)
+        # categories.append(key)
+        # percentages.append(int(percent*100))
+    for key,value in percentages.items(): 
+        print(f"{key} : {value}%")
     print(f"Total: {round(totals['Total'], 2)}")
-    plt.pie(percentages, labels = categories)
+
+    generateXLSXFiles(totals, percentages, date)
+
+    plt.pie(percentages.values(), labels = percentages.keys())
     plt.show()
+
+
 
 def getFileName(): 
     attempts = 0
@@ -185,9 +219,13 @@ def getFileName():
     return file
 
 def moveRenameFile(file, destPath, append):
+
     cur_name = os.path.basename(file)
     cur_name, extension = os.path.splitext(cur_name)
-    destination = destPath + cur_name + append + extension
+    if(cur_name[-len(append):] != append):
+        destination = destPath + cur_name + append + extension
+    else: 
+        destination = destPath + cur_name + extension
     shutil.move(file, destination)
     if os.path.exists(destination): 
         print(f'File moved from {file} to {destination}')
@@ -200,16 +238,11 @@ def moveRenameFile(file, destPath, append):
 
         
 def main():
-    # with open('statement_file.txt', 'r') as file: 
-    #     statement_name = file.read()
-    file = getFileName()
+    global destPath
+    filePath = getFileName()
     
-    statement = getStatement(PdfReader(file))
+    statement = getStatement(PdfReader(filePath))
     purchases = getPurchases(statement)
-    month = getMonth(statement, purchases)
-    print(month)
-    
-
     # for line in statement:
     #     print(line)
     # print(text)
@@ -227,14 +260,12 @@ def main():
         
     totals = getSpending(purchases)
 
-    printPercentages(totals)
+    with open('dest_path.txt', 'r') as file:  
+        destPath = file.read()
 
-    # with open('dest_path.txt', 'r') as file:  
-    #     destination = file.read()
-
-    # moveRenameFile(file, destination, get)
-        
-    
+    monthYear = getMonth(statement, purchases)
+    moveRenameFile(filePath, destPath, monthYear)  
+    generateOutputs(totals, monthYear)
 
     # print(statement[0])
     # print(len(statement))
